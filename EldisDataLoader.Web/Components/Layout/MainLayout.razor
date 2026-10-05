@@ -1,0 +1,263 @@
+﻿@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+@attribute [Authorize]
+@inherits LayoutComponentBase
+
+@inject UserAccessService UserAccessService
+@inject NavigationManager Navigation
+@inject IWebHostEnvironment WebEnvironment
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+@if (!isAccessChecked)
+{
+    <div class="d-flex justify-content-center align-items-center" style="height: 100vh;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Проверка доступа...</span>
+        </div>
+    </div>
+}
+else if (!hasAccess)
+{
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow border-danger">
+                    <div class="card-header bg-danger text-white text-center">
+                        <h4 class="mb-0"><i class="bi bi-shield-x"></i> Доступ запрещён</h4>
+                    </div>
+                    <div class="card-body">
+                        <p class="fs-5 mb-3 text-center">
+                            У вас нет доступа к этой системе.
+                        </p>
+
+                        <hr />
+
+                        <h6 class="text-primary mb-3">
+                            <i class="bi bi-bug"></i> Отладочная информация (для администратора):
+                        </h6>
+
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr>
+                                    <th style="width: 30%;">Имя пользователя (Name):</th>
+                                    <td><code>@userLogin</code></td>
+                                </tr>
+                                @* <tr>
+                                    <th>IsAuthenticated:</th>
+                                    <td><code>@isAuthenticated</code></td>
+                                </tr>
+                                <tr>
+                                    <th>AuthenticationType:</th>
+                                    <td><code>@authType</code></td>
+                                </tr>
+                                <tr>
+                                    <th>Среда (Environment):</th>
+                                    <td><code>@WebEnvironment.EnvironmentName</code></td>
+                                </tr> *@
+                            </tbody>
+                        </table>
+
+                        @* <h6 class="text-primary mt-3 mb-2">Все Claims (утверждения):</h6>
+                        @if (claimsList.Count == 0)
+                        {
+                            <div class="alert alert-warning">
+                                Claims не найдены. Возможно, Windows-аутентификация не работает.
+                            </div>
+                        }
+                        else
+                        {
+                            <table class="table table-sm table-bordered table-striped">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Тип (Type)</th>
+                                        <th>Значение (Value)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var claim in claimsList)
+                                    {
+                                        <tr>
+                                            <td><code>@claim.Type</code></td>
+                                            <td><code>@claim.Value</code></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+
+                        <div class="alert alert-info mt-3">
+                            <strong>💡 Что делать:</strong> Скопируйте значение из поля <code>Имя пользователя</code>
+                            и добавьте его в таблицу <code>EldisUsers</code> в поле <code>DomainLogin</code>.
+                        </div> *@
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="page">
+        <div class="sidebar bg-dark text-white p-0" style="min-width: 280px; box-shadow: 2px 0 5px rgba(0,0,0,0.1);">
+            <div class="p-3 bg-primary">
+                <h4 class="mb-0 text-white">
+                    <i class="bi bi-speedometer2"></i> Eldis
+                </h4>
+                <small class="text-white-50">Система мониторинга</small>
+            </div>
+
+            <nav class="nav flex-row flex-wrap p-2 gap-2">
+                <a class="nav-link text-white py-2 px-3 rounded" href="/" style="transition: all 0.2s; white-space: nowrap;">
+                    <i class="bi bi-house-door me-2"></i> Главная
+                </a>
+                <a class="nav-link text-white py-2 px-3 rounded" href="/objects" style="transition: all 0.2s; white-space: nowrap;">
+                    <i class="bi bi-building me-2"></i> Объекты
+                </a>
+                <a class="nav-link text-white py-2 px-3 rounded" href="/devices" style="transition: all 0.2s; white-space: nowrap;">
+                    <i class="bi bi-cpu me-2"></i> Приборы учёта
+                </a>
+                <a class="nav-link text-white py-2 px-3 rounded" href="/meteringpoints" style="transition: all 0.2s; white-space: nowrap;">
+                    <i class="bi bi-geo-alt me-2"></i> Точки учёта
+                </a>
+                <a class="nav-link text-white py-2 px-3 rounded" href="/rawdata" style="transition: all 0.2s; white-space: nowrap;">
+                    <i class="bi bi-table me-2"></i> ПУ пкз (сырые данные)
+                </a>
+                   <a class="nav-link text-white py-2 px-3 rounded" href="/raw-data-stats" style="transition: all 0.2s; white-space: nowrap;">
+                   <i class="bi bi-calendar3 me-2"></i> ПУ пкз (статистика загрузки)
+                </a>
+                <a class="nav-link text-white py-2 px-3 rounded" href="/history-progress" style="transition: all 0.2s; white-space: nowrap;">
+                   <i class="bi bi-activity me-2"></i> Прогресс загрузки истории
+                </a>             
+                <a class="nav-link text-white py-2 px-3 rounded" href="/debug" style="transition: all 0.2s; white-space: nowrap;">
+                    <i class="bi bi-bug me-2"></i> Отладка
+                </a>            </nav>
+        </div>
+
+        <main class="flex-grow-1 bg-light">
+            <div class="top-row px-4 py-2 bg-white border-bottom d-flex justify-content-end align-items-center">
+                <span class="text-muted">
+                    <i class="bi bi-person-circle"></i> @currentUserDisplayName
+                    <small class="ms-2 badge bg-info">@currentUserRole</small>
+                </span>
+            </div>
+
+            <article class="content px-4 py-3">
+                @Body
+            </article>
+        </main>
+    </div>
+}
+
+<div id="blazor-error-ui" data-noscript>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss"></span>
+</div>
+
+<style>
+    .sidebar .nav-link:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+</style>
+
+@code {
+    private bool isAccessChecked = false;
+    private bool hasAccess = false;
+    private string? currentUserLogin = "";
+    private string? currentUserDisplayName = "";
+    private string? currentUserRole = "";
+
+    // Отладочные переменные
+    private string userLogin = "(пусто)";
+    private string isAuthenticated = "(не определено)";
+    private string authType = "(не определено)";
+    private List<ClaimInfo> claimsList = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ЕДИНСТВЕННЫЙ надежный способ получить пользователя в Blazor
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+       // =====================================================================
+        // ВРЕМЕННЫЙ ОБХОД ДЛЯ ЛОКАЛЬНОЙ РАЗРАБОТКИ (Visual Studio)
+        // На сервере (Production) этот блок игнорируется!
+        // =====================================================================
+        if (WebEnvironment.IsDevelopment())
+        {
+            // Подставьте сюда ваш реальный логин из таблицы EldisUsers, 
+            // или оставьте "DevUser", если у вас в БД есть такой пользователь с доступом.
+            currentUserLogin = "DevUser"; 
+            hasAccess = true;
+            currentUserDisplayName = "Разработчик (Local)";
+            currentUserRole = "Admin";
+            isAccessChecked = true;
+            return; // Завершаем метод, не доходя до строгой проверки
+        }
+        // =====================================================================
+     
+        
+        // Собираем отладочную информацию
+        if (user?.Identity != null)
+        {
+            userLogin = user.Identity.Name ?? "(не задано)";
+            isAuthenticated = user.Identity.IsAuthenticated.ToString();
+            authType = user.Identity.AuthenticationType ?? "(не задано)";
+
+            claimsList = user.Claims
+                .Select(c => new ClaimInfo { Type = c.Type, Value = c.Value })
+                .ToList();
+        }
+
+        // ОПРЕДЕЛЯЕМ ЛОГИН
+        if (user?.Identity?.IsAuthenticated == true && !string.IsNullOrEmpty(user.Identity.Name))
+        {
+            var rawLogin = user.Identity.Name;
+            currentUserLogin = NormalizeLogin(rawLogin);
+        }
+        else
+        {
+            currentUserLogin = "Неизвестно";
+            userLogin = "Не аутентифицирован (из Windows-аутентификации)";
+        }
+
+        // Проверяем доступ
+        if (!string.IsNullOrEmpty(currentUserLogin) && currentUserLogin != "Неизвестно")
+        {
+            var (isAllowed, fullName, role) = await UserAccessService.CheckAccessAsync(currentUserLogin);
+            hasAccess = isAllowed;
+            currentUserDisplayName = fullName ?? currentUserLogin;
+            currentUserRole = role ?? "User";
+        }
+
+        isAccessChecked = true;
+    }
+
+    private string NormalizeLogin(string login)
+    {
+        if (WebEnvironment.IsDevelopment())
+        {
+            return login;
+        }
+
+        if (login.Contains('\\'))
+        {
+            return login.Split('\\').Last();
+        }
+
+        if (login.Contains('@'))
+        {
+            return login.Split('@').First();
+        }
+
+        return login;
+    }
+
+    private class ClaimInfo
+    {
+        public string Type { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+}

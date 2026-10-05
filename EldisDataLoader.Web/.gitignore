@@ -1,0 +1,12 @@
+﻿# Настройки с паролями — НЕ отправляем в интернет!
+appsettings.json
+appsettings.Development.json
+
+# Служебные папки сборки
+bin/
+obj/
+.vs/
+
+# Пользовательские настройки Visual Studio
+*.user
+*.suo

@@ -1,0 +1,396 @@
+﻿@page "/rawdata"
+@using EldisDataLoader.Web.Services
+@inject RawDataQueryService RawDataService
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+
+<PageTitle>Сырые данные - Eldis</PageTitle>
+
+<style>
+    /* 🎨 ДИЗАЙН ТАБЛИЦЫ: Компактный, с четкими границами и зеброй */
+    .compact-table {
+        font-size: 0.85rem;
+        border-collapse: collapse;
+        width: 100%;
+    }
+
+        .compact-table th,
+        .compact-table td {
+            padding: 6px 8px;
+            border: 1px solid #dee2e6;
+            vertical-align: middle;
+        }
+
+        .compact-table thead th {
+            background-color: #212529 !important;
+            color: white !important;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        /* Чередование цветов строк (зебра) */
+        .compact-table tbody tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        /* Подсветка при наведении */
+        .compact-table tbody tr:hover {
+            background-color: #e9ecef;
+        }
+
+    .table-scroll-container {
+        height: calc(100vh - 280px);
+        overflow-y: auto;
+        overflow-x: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+    }
+
+    /* Подсветка края заголовка при наведении */
+    .resizer:hover {
+        background-color: #0d6efd !important; /* Синяя полоска */
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0 fw-bold">
+        <i class="bi bi-table text-primary"></i> Сырые данные
+    </h4>
+    <span class="badge bg-primary fs-6">
+        Записей: @rawDataList.Count
+    </span>
+</div>
+
+<!-- Панель выбора даты -->
+<div class="card shadow-sm mb-3">
+    <div class="card-body py-3">
+        <div class="row align-items-end g-2">
+            <div class="col-md-4">
+                <label class="form-label fw-semibold small text-muted">Выберите дату:</label>
+                <input type="date" @bind="selectedDate" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-4">
+                <button @onclick="LoadData" class="btn btn-primary btn-sm" disabled="@isLoading" style="width: 100%;">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                        <span>Загрузка...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-search me-1"></i>
+                        <span>Показать данные</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger py-2">
+        <i class="bi bi-exclamation-triangle"></i> @errorMessage
+    </div>
+}
+else if (rawDataList.Count == 0 && !isLoading)
+{
+    <div class="alert alert-info py-2">
+        <i class="bi bi-info-circle"></i> Нет данных за выбранную дату. Выберите дату и нажмите "Показать данные".
+    </div>
+}
+else if (!isLoading)
+{
+    <!-- Поле поиска -->
+    <div class="card shadow-sm mb-3">
+        <div class="card-body py-2">
+            <div class="input-group input-group-sm">
+                <span class="input-group-text bg-white border-end-0">
+                    <i class="bi bi-search text-primary"></i>
+                </span>
+                <input type="text"
+                       class="form-control border-start-0"
+                       placeholder="Поиск по № ПУ, прибору или адресу..."
+                       @bind="searchTerm"
+                       @bind:event="oninput" />
+                @if (!string.IsNullOrEmpty(searchTerm))
+                {
+                    <button class="btn btn-outline-secondary border-start-0" @onclick="ClearSearch">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(searchTerm))
+    {
+        <div class="alert alert-light border mb-3 py-2 small">
+            <i class="bi bi-funnel"></i>
+            Найдено: <strong>@filteredData.Count()</strong> из <strong>@rawDataList.Count</strong> по запросу "<em>@searchTerm</em>"
+        </div>
+    }
+
+    <!-- Таблица -->
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            @if (!SortedData.Any())
+            {
+                <div class="p-4 text-center text-muted">
+                    <i class="bi bi-emoji-frown fs-1"></i>
+                    <p class="mt-2 mb-0">По вашему запросу ничего не найдено</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-scroll-container">
+                    <table class="table compact-table resizable-table mb-0">
+                        <thead>
+                            <tr>
+                                <th @onclick="@(() => SortBy("RowNumber"))" style="cursor: pointer; width: 50px;">🔢 @GetSortIcon("RowNumber")</th>
+                                <th @onclick="@(() => SortBy("Link"))" style="cursor: pointer;">🔗 LINK @GetSortIcon("Link")</th>
+                                <th @onclick="@(() => SortBy("SerialNumber"))" style="cursor: pointer;">🆔 № ПУ @GetSortIcon("SerialNumber")</th>
+                                <th @onclick="@(() => SortBy("DeviceName"))" style="cursor: pointer;">⚙️ Прибор @GetSortIcon("DeviceName")</th>
+                                <th @onclick="@(() => SortBy("Address"))" style="cursor: pointer;">📍 Адрес @GetSortIcon("Address")</th>
+                                <th @onclick="@(() => SortBy("DtMeasure"))" style="cursor: pointer;">📅 Дата @GetSortIcon("DtMeasure")</th>
+                                <th @onclick="@(() => SortBy("QgItogTv"))" style="cursor: pointer;">Qg @GetSortIcon("QgItogTv")</th>
+                                <th @onclick="@(() => SortBy("MgItogTv"))" style="cursor: pointer;">Mg @GetSortIcon("MgItogTv")</th>
+                                <th @onclick="@(() => SortBy("V1Tr"))" style="cursor: pointer;">💧 V1 @GetSortIcon("V1Tr")</th>
+                                <th @onclick="@(() => SortBy("V2Tr"))" style="cursor: pointer;">💧 V2 @GetSortIcon("V2Tr")</th>
+                                <th @onclick="@(() => SortBy("M1Tr"))" style="cursor: pointer;">⚖️ M1 @GetSortIcon("M1Tr")</th>
+                                <th @onclick="@(() => SortBy("M2Tr"))" style="cursor: pointer;">⚖️ M2 @GetSortIcon("M2Tr")</th>
+                                <th @onclick="@(() => SortBy("T1"))" style="cursor: pointer;">🌡️ t1 @GetSortIcon("T1")</th>
+                                <th @onclick="@(() => SortBy("T2"))" style="cursor: pointer;">🌡️ t2 @GetSortIcon("T2")</th>
+                                <th @onclick="@(() => SortBy("P1"))" style="cursor: pointer;">⏲️ P1 @GetSortIcon("P1")</th>
+                                <th @onclick="@(() => SortBy("P2"))" style="cursor: pointer;">⏲️ P2 @GetSortIcon("P2")</th>
+                                <th style="width: 160px;">✅ Статус API</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (isSorting)
+                            {
+                                <tr>
+                                    <td colspan="17" class="text-center py-4">
+                                        <div class="d-flex flex-column align-items-center">
+                                            <div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem;"></div>
+                                            <div class="mt-2 text-muted small">Сортировка данных...</div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var data in SortedData)
+                                {
+                                    <tr>
+                                        <td class="text-center text-muted fw-bold">@data.RowNumber</td>
+                                        <td class="fw-semibold" style="font-size: 0.8rem;">@data.Link</td>
+                                        <td class="fw-semibold">@HighlightText(data.SerialNumber ?? "—")</td>
+                                        <td>@HighlightText(data.DeviceName ?? "—")</td>
+                                        <td>@HighlightText(data.Address ?? "—")</td>
+                                        <td class="text-center" style="white-space: nowrap;">@data.DtMeasure?.ToString("dd.MM.yyyy")</td>
+
+                                        <td class="text-end">@data.QgItogTv?.ToString("0.000")</td>
+                                        <td class="text-end">@data.MgItogTv?.ToString("0.000")</td>
+                                        <td class="text-end">@data.V1Tr?.ToString("0.000")</td>
+                                        <td class="text-end">@data.V2Tr?.ToString("0.000")</td>
+                                        <td class="text-end">@data.M1Tr?.ToString("0.000")</td>
+                                        <td class="text-end">@data.M2Tr?.ToString("0.000")</td>
+                                        <td class="text-end">@data.T1?.ToString("0.0")</td>
+                                        <td class="text-end">@data.T2?.ToString("0.0")</td>
+                                        <td class="text-end">@data.P1?.ToString("0.000")</td>
+                                        <td class="text-end">@data.P2?.ToString("0.000")</td>
+
+                                        <!-- 🟢 НОВЫЙ СТАТУС С РЕАЛЬНЫМ ТЕКСТОМ ОТ ЭЛДИС -->
+                                        <td class="align-middle" style="vertical-align: middle;">
+                                            @if (!string.IsNullOrWhiteSpace(data.ApiStatusMessage))
+                                            {
+                                                <div class="text-warning small fw-semibold"
+                                                     title="@data.ApiStatusMessage"
+                                                     style="font-size: 0.75rem; line-height: 1.2; max-width: 150px; word-wrap: break-word; cursor: help;">
+                                                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                                    @data.ApiStatusMessage
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div class="text-center">
+                                                    <i class="bi bi-check-circle-fill text-success fs-5" title="Данные успешно загружены"></i>
+                                                </div>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private DateTime selectedDate = DateTime.Today.AddDays(-1);
+    private List<RawDataViewDto> rawDataList = new();
+    private bool isLoading = false;
+    private bool isSorting = false;
+    private string searchTerm = "";
+    private string? errorMessage;
+
+    private string sortColumn = "RowNumber";
+    private bool sortAscending = true;
+
+    private IEnumerable<RawDataViewDto> SortedData => ApplySorting(filteredData);
+
+    private async Task SortByAsync(string columnName)
+    {
+        if (sortColumn == columnName)
+            sortAscending = !sortAscending;
+        else
+        {
+            sortColumn = columnName;
+            sortAscending = true;
+        }
+
+        isSorting = true;
+        StateHasChanged();
+        await Task.Delay(50);
+        await Task.Run(() => { _ = SortedData.ToList(); });
+        isSorting = false;
+        StateHasChanged();
+    }
+
+    private void SortBy(string columnName) { _ = SortByAsync(columnName); }
+
+    private string GetSortIcon(string columnName)
+    {
+        if (sortColumn != columnName) return "";
+        return sortAscending ? " ▲" : " ▼";
+    }
+
+    private IEnumerable<RawDataViewDto> ApplySorting(IEnumerable<RawDataViewDto> data)
+    {
+        if (string.IsNullOrEmpty(sortColumn)) return data;
+
+        if (sortAscending)
+        {
+            return sortColumn switch
+            {
+                "RowNumber" => data.OrderBy(x => x.RowNumber),
+                "Link" => data.OrderBy(x => x.Link),
+                "SerialNumber" => data.OrderBy(x => x.SerialNumber),
+                "DeviceName" => data.OrderBy(x => x.DeviceName),
+                "Address" => data.OrderBy(x => x.Address),
+                "DtMeasure" => data.OrderBy(x => x.DtMeasure),
+                "QgItogTv" => data.OrderBy(x => x.QgItogTv),
+                "MgItogTv" => data.OrderBy(x => x.MgItogTv),
+                "V1Tr" => data.OrderBy(x => x.V1Tr),
+                "V2Tr" => data.OrderBy(x => x.V2Tr),
+                "M1Tr" => data.OrderBy(x => x.M1Tr),
+                "M2Tr" => data.OrderBy(x => x.M2Tr),
+                "T1" => data.OrderBy(x => x.T1),
+                "T2" => data.OrderBy(x => x.T2),
+                "P1" => data.OrderBy(x => x.P1),
+                "P2" => data.OrderBy(x => x.P2),
+                _ => data
+            };
+        }
+        else
+        {
+            return sortColumn switch
+            {
+                "RowNumber" => data.OrderByDescending(x => x.RowNumber),
+                "Link" => data.OrderByDescending(x => x.Link),
+                "SerialNumber" => data.OrderByDescending(x => x.SerialNumber),
+                "DeviceName" => data.OrderByDescending(x => x.DeviceName),
+                "Address" => data.OrderByDescending(x => x.Address),
+                "DtMeasure" => data.OrderByDescending(x => x.DtMeasure),
+                "QgItogTv" => data.OrderByDescending(x => x.QgItogTv),
+                "MgItogTv" => data.OrderByDescending(x => x.MgItogTv),
+                "V1Tr" => data.OrderByDescending(x => x.V1Tr),
+                "V2Tr" => data.OrderByDescending(x => x.V2Tr),
+                "M1Tr" => data.OrderByDescending(x => x.M1Tr),
+                "M2Tr" => data.OrderByDescending(x => x.M2Tr),
+                "T1" => data.OrderByDescending(x => x.T1),
+                "T2" => data.OrderByDescending(x => x.T2),
+                "P1" => data.OrderByDescending(x => x.P1),
+                "P2" => data.OrderByDescending(x => x.P2),
+                _ => data
+            };
+        }
+    }
+
+    private IEnumerable<RawDataViewDto> filteredData => string.IsNullOrWhiteSpace(searchTerm)
+        ? rawDataList
+        : rawDataList.Where(d =>
+            (d.SerialNumber?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (d.DeviceName?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (d.Address?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+        );
+
+    protected override async Task OnInitializedAsync()
+    {
+        // await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        errorMessage = null;
+        searchTerm = "";
+        rawDataList = new List<RawDataViewDto>();
+        StateHasChanged();
+
+        try
+        {
+            rawDataList = await RawDataService.GetRawDataByDateAsync(selectedDate);
+
+            // 🛡️ Заставляем Blazor немедленно обновить HTML на странице
+            StateHasChanged();
+
+            // Даем браузеру 300 миллисекунд, чтобы он успел нарисовать таблицу
+            await Task.Delay(300);
+
+            // И только теперь запускаем скрипт
+            await JS.InvokeVoidAsync("makeTableResizable");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Ошибка загрузки данных: {ex.Message}";
+            Console.WriteLine($"Error loading data: {ex}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearSearch() { searchTerm = ""; }
+
+    private MarkupString HighlightText(string? text)
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrWhiteSpace(searchTerm))
+            return new MarkupString(System.Net.WebUtility.HtmlEncode(text ?? "—"));
+
+        var encoded = System.Net.WebUtility.HtmlEncode(text);
+        var encodedSearch = System.Net.WebUtility.HtmlEncode(searchTerm);
+        var highlighted = System.Text.RegularExpressions.Regex.Replace(
+            encoded, System.Text.RegularExpressions.Regex.Escape(encodedSearch),
+            $"<mark>{encodedSearch}</mark>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return new MarkupString(highlighted);
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && rawDataList.Count > 0)
+        {
+            await JS.InvokeVoidAsync("makeTableResizable");
+        }
+    }
+}

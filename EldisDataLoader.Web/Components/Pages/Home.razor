@@ -1,0 +1,18 @@
+﻿@page "/"
+@inject EldisDataLoader.Web.Services.DbTestService DbTestService
+
+<PageTitle>Главная - Eldis</PageTitle>
+
+<h1>Добро пожаловать в систему Eldis!</h1>
+
+<p>Статус подключения к базе данных: <b>@status</b></p>
+
+@code {
+    private string status = "Проверка...";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // При загрузке страницы вызываем наш сервис
+        status = await DbTestService.GetDatabaseStatusAsync();
+    }
+}

@@ -1,0 +1,215 @@
+﻿@page "/raw-data-stats"
+@using EldisDataLoader.Web.Services
+@inject RawDataQueryService RawDataService
+@rendermode InteractiveServer
+
+<PageTitle>Статистика загрузки</PageTitle>
+
+<style>
+    /* Контейнер с фиксированной высотой и скроллом */
+    .table-scroll-container {
+        height: calc(100vh - 250px);
+        overflow-y: auto;
+        overflow-x: auto;
+    }
+
+    /* Делаем заголовок "липким" */
+    .sticky-thead th {
+        position: sticky;
+        top: 0;
+        background-color: #212529 !important;
+        color: white !important;
+        z-index: 10;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        white-space: nowrap;
+    }
+</style>
+
+<h3 class="mb-4">📊 Статистика загрузки сырых данных</h3>
+
+@if (isLoading)
+{
+    <div class="card shadow-sm p-5 text-center">
+        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Загрузка...</span>
+        </div>
+        <div class="mt-3 text-muted fw-semibold">Загрузка статистики...</div>
+    </div>
+}
+else if (statsList.Count == 0)
+{
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> Нет данных для отображения
+    </div>
+}
+else
+{
+    <!-- Таблица с результатами -->
+    <div class="card shadow-sm mb-3">
+        <div class="card-body p-0">
+            <div class="table-responsive table-scroll-container">
+                <table class="table table-striped table-hover table-sm mb-0 compact-table">
+                    <thead class="table-dark sticky-thead">
+                        <tr>
+                            <th @onclick="@(() => SortBy("RowNumber"))" style="cursor: pointer; width: 60px; text-align: center;">🔢 № @GetSortIcon("RowNumber")</th>
+                            <th @onclick="@(() => SortBy("MeasureDate"))" style="cursor: pointer;">📅 Дата показаний @GetSortIcon("MeasureDate")</th>
+                            <th @onclick="@(() => SortBy("RecordCount"))" style="cursor: pointer;">📊 Кол-во записей @GetSortIcon("RecordCount")</th>
+                            <th @onclick="@(() => SortBy("ImportedAt"))" style="cursor: pointer;">📥 Дата загрузки @GetSortIcon("ImportedAt")</th>
+                            <th>🔄 Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (isSorting)
+                        {
+                            <tr>
+                                <td colspan="5" class="text-center py-4">
+                                    <div class="d-flex flex-column align-items-center">
+                                        <div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem;"></div>
+                                        <div class="mt-2 text-muted small">Сортировка данных...</div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var vm in SortedStats)
+                            {
+                                <tr class="@(vm.Stat.RecordCount < 1000 ? "table-warning" : "")">
+                                    <td class="text-center text-muted fw-bold">@vm.RowNumber</td>
+                                    <td style="white-space: nowrap;">@vm.Stat.MeasureDate.ToString("dd.MM.yyyy")</td>
+                                    <td><strong>@vm.Stat.RecordCount.ToString("N0")</strong></td>
+                                    <td style="white-space: nowrap;">@vm.Stat.ImportedAt.ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        @if (vm.Stat.RecordCount >= 5000)
+                                        {
+                                            <span class="badge bg-success">✅ Полная</span>
+                                        }
+                                        else if (vm.Stat.RecordCount >= 1000)
+                                        {
+                                            <span class="badge bg-warning text-dark">⚠️ Частичная</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-danger">❌ Мало данных</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="alert alert-info mt-3 mb-0">
+        <strong>Итого:</strong> Всего дней: @statsList.Count |
+        Всего записей: @statsList.Sum(x => x.Stat.RecordCount).ToString("N0") |
+        Средняя записей в день: @(statsList.Average(x => x.Stat.RecordCount).ToString("N0"))
+    </div>
+}
+
+@code {
+    // 🎯 КЛАССИЧЕСКИЙ ПАТТЕРН: ViewModel для добавления UI-поля без изменения исходного DTO
+    private class StatViewModel
+    {
+        public int RowNumber { get; set; }
+        public RawDataStatDto Stat { get; set; }
+    }
+
+    private List<StatViewModel> statsList = new();
+    private bool isLoading = true;
+    private bool isSorting = false;
+
+    // По умолчанию сортируем по дате от новых к старым (как было в оригинале)
+    private string sortColumn = "MeasureDate";
+    private bool sortAscending = false;
+
+    private IEnumerable<StatViewModel> SortedStats => ApplySorting(statsList);
+
+    private async Task SortByAsync(string columnName)
+    {
+        if (sortColumn == columnName)
+            sortAscending = !sortAscending;
+        else
+        {
+            sortColumn = columnName;
+            sortAscending = true; // Для новой колонки начинаем с возрастания
+        }
+
+        isSorting = true;
+        StateHasChanged();
+        await Task.Delay(50);
+        await Task.Run(() => { _ = SortedStats.ToList(); });
+        isSorting = false;
+        StateHasChanged();
+    }
+
+    private void SortBy(string columnName) { _ = SortByAsync(columnName); }
+
+    private string GetSortIcon(string columnName)
+    {
+        if (sortColumn != columnName) return "";
+        return sortAscending ? " ▲" : " ▼";
+    }
+
+    private IEnumerable<StatViewModel> ApplySorting(IEnumerable<StatViewModel> data)
+    {
+        if (string.IsNullOrEmpty(sortColumn)) return data;
+
+        if (sortAscending)
+        {
+            return sortColumn switch
+            {
+                "RowNumber" => data.OrderBy(x => x.RowNumber),
+                "MeasureDate" => data.OrderBy(x => x.Stat.MeasureDate),
+                "RecordCount" => data.OrderBy(x => x.Stat.RecordCount),
+                "ImportedAt" => data.OrderBy(x => x.Stat.ImportedAt),
+                _ => data
+            };
+        }
+        else
+        {
+            return sortColumn switch
+            {
+                "RowNumber" => data.OrderByDescending(x => x.RowNumber),
+                "MeasureDate" => data.OrderByDescending(x => x.Stat.MeasureDate),
+                "RecordCount" => data.OrderByDescending(x => x.Stat.RecordCount),
+                "ImportedAt" => data.OrderByDescending(x => x.Stat.ImportedAt),
+                _ => data
+            };
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadStatsAsync();
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        isLoading = true;
+        StateHasChanged();
+        try
+        {
+            var rawStats = await RawDataService.GetRawDataStatsAsync();
+
+            // 🎯 КЛАССИЧЕСКАЯ ГЕНЕРАЦИЯ: нумерация строк
+            statsList = rawStats.Select((s, index) => new StatViewModel
+            {
+                RowNumber = index + 1,
+                Stat = s
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            // Можно добавить логирование ошибки, если нужно
+            Console.WriteLine($"Ошибка загрузки статистики: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+}

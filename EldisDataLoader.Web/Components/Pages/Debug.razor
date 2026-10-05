@@ -1,0 +1,263 @@
+﻿@page "/debug"
+@using System.Text.Json
+@using System.Net.Http
+@inject IConfiguration Configuration
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>Отладка API - Eldis</PageTitle>
+
+<style>
+    .json-output {
+        background-color: #1e1e1e;
+        color: #d4d4d4;
+        font-family: 'Consolas', 'Courier New', monospace;
+        font-size: 13px;
+        padding: 15px;
+        border-radius: 6px;
+        max-height: 70vh;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        line-height: 1.5;
+    }
+
+    .url-display {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 10px;
+        font-family: 'Consolas', monospace;
+        font-size: 12px;
+        word-break: break-all;
+        margin-top: 10px;
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">
+        <i class="bi bi-bug text-warning"></i> Песочница API ЭЛДИС
+    </h2>
+</div>
+
+<!-- Панель параметров запроса -->
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <h6 class="card-subtitle mb-3 text-muted">Параметры запроса</h6>
+        <div class="row g-3 align-items-end">
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">ID точки учёта (Guid):</label>
+                <input type="text" @bind="pointId" @bind:event="oninput" class="form-control" placeholder="Вставьте ID точки из базы..." />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">Дата:</label>
+                <input type="date" @bind="selectedDate" @bind:event="oninput" class="form-control" />
+            </div>
+            <div class="col-md-3">
+                <button @onclick="GetRawJsonAsync" class="btn btn-primary w-100" disabled="@isLoading">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                        <span>Запрос к API...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-code-slash me-1"></i>
+                        <span>Получить сырой JSON</span>
+                    }
+                </button>
+            </div>
+        </div>
+        <div class="mt-2 text-muted small">
+            <i class="bi bi-info-circle"></i> Настройки (URL, Ключ, Логин/Пароль) берутся автоматически из appsettings.json.
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(lastRequestUrl))
+{
+    <div class="card shadow-sm mb-3">
+        <div class="card-header bg-light">
+            <strong><i class="bi bi-link-45deg"></i> URL запроса:</strong>
+        </div>
+        <div class="card-body p-2">
+            <div class="url-display">@lastRequestUrl</div>
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle"></i> @errorMessage
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(rawJson))
+{
+    <div class="card shadow-sm">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-braces"></i> Сырой ответ от API ЭЛДИС</span>
+            <button @onclick="CopyToClipboard" class="btn btn-sm btn-outline-light" title="Копировать в буфер обмена">
+                <i class="bi bi-clipboard"></i> Копировать
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <div class="json-output">@rawJson</div>
+        </div>
+    </div>
+}
+
+@code {
+    private string pointId = "";
+    private DateTime selectedDate = DateTime.Today.AddDays(-1);
+    private bool isLoading = false;
+    private string? errorMessage;
+    private string rawJson = "";
+    private string lastRequestUrl = "";
+
+    protected override void OnInitialized()
+    {
+        // Приоритет №1: берём ID из URL (?pointId=xxx)
+        var uri = new Uri(Navigation.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("pointId", out var vals))
+        {
+            var fromUrl = vals.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(fromUrl))
+                pointId = fromUrl;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Приоритет №2: если в URL ничего нет — читаем localStorage (клик по строке в таблице)
+        if (firstRender && string.IsNullOrWhiteSpace(pointId))
+        {
+            try
+            {
+                var stored = await JS.InvokeAsync<string>("localStorage.getItem", "selectedPointId");
+                if (!string.IsNullOrWhiteSpace(stored))
+                {
+                    pointId = stored;
+                    StateHasChanged();
+                }
+            }
+            catch
+            {
+                // JS interop ещё не готов — тихо игнорируем
+            }
+        }
+    }
+
+    private async Task GetRawJsonAsync()
+    {
+        if (string.IsNullOrWhiteSpace(pointId))
+        {
+            errorMessage = "Поле ID пустое. Вставьте Guid вручную или кликните по строке на странице «Точки учёта».";
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = null;
+        rawJson = "";
+        lastRequestUrl = "";
+        StateHasChanged();
+
+        try
+        {
+            // 1. Читаем настройки из appsettings.json
+            var baseUrl = Configuration["EldisApi:BaseUrl"];
+            var keyApi = Configuration["EldisApi:KeyApi"];
+            var login = Configuration["EldisApi:Login"];
+            var password = Configuration["EldisApi:Password"];
+
+            if (string.IsNullOrEmpty(baseUrl) || string.IsNullOrEmpty(login))
+            {
+                errorMessage = "Ошибка: В appsettings.json веб-проекта не заполнены настройки EldisApi (BaseUrl, Login, Password).";
+                return;
+            }
+
+            using var authClient = new HttpClient();
+            authClient.DefaultRequestHeaders.Add("key", keyApi);
+
+            // 2. Получаем токен
+            var formData = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("login", login),
+                new KeyValuePair<string, string>("password", password)
+            });
+
+            var loginResponse = await authClient.PostAsync($"{baseUrl}/v1/users/login", formData);
+            loginResponse.EnsureSuccessStatusCode();
+
+            string token = "";
+            if (loginResponse.Headers.TryGetValues("Set-Cookie", out var cookies))
+            {
+                foreach (var c in cookies)
+                {
+                    if (c.Contains("access_token="))
+                    {
+                        token = c.Split("access_token=").Last().Split(';').First().Trim();
+                        break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(token))
+            {
+                errorMessage = "Не удалось получить токен авторизации. Проверьте логин и пароль в appsettings.json.";
+                return;
+            }
+
+            // 3. Формируем URL запроса
+            var dateStr = selectedDate.ToString("dd.MM.yyyy");
+            var startDate = $"{dateStr} 00:00:00";
+            var endDate = $"{dateStr} 23:59:59";
+
+            // 🆕 Возвращаем typeDataCode=30004 (Суточный архив)
+            var typeDataCode = "30004";
+
+            var url = $"{baseUrl}/v3/data/rawData?id={Uri.EscapeDataString(pointId)}&startDate={Uri.EscapeDataString(startDate)}&endDate={Uri.EscapeDataString(endDate)}&typeDataCode={typeDataCode}&displayAll=false";
+
+            lastRequestUrl = url; // Сохраняем URL для отображения
+            using var dataClient = new HttpClient();
+
+            dataClient.DefaultRequestHeaders.Add("key", keyApi);
+            dataClient.DefaultRequestHeaders.Add("Cookie", $"access_token={token}");
+
+            var dataResponse = await dataClient.GetAsync(url);
+
+            if (!dataResponse.IsSuccessStatusCode)
+            {
+                var err = await dataResponse.Content.ReadAsStringAsync();
+                errorMessage = $"Ошибка API: {dataResponse.StatusCode}\n{err}";
+                return;
+            }
+
+            var jsonString = await dataResponse.Content.ReadAsStringAsync();
+
+            // Форматируем JSON
+            var jsonElement = JsonSerializer.Deserialize<JsonElement>(jsonString);
+            rawJson = JsonSerializer.Serialize(jsonElement, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Ошибка: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CopyToClipboard()
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", rawJson);
+    }
+}

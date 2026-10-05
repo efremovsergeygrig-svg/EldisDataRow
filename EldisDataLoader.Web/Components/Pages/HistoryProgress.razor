@@ -1,0 +1,290 @@
+﻿@page "/history-progress"
+@using EldisDataLoader.Web.Services
+@inject RawDataQueryService RawDataService
+@rendermode InteractiveServer
+
+<PageTitle>Прогресс загрузки истории - Eldis</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="mb-0 fw-bold">
+        <i class="bi bi-activity text-primary"></i> Прогресс загрузки истории
+    </h4>
+    <button @onclick="LoadData" class="btn btn-primary btn-sm" disabled="@isLoading">
+        @if (isLoading)
+        {
+            <span class="spinner-border spinner-border-sm me-1"></span>
+            <span>Обновление...</span>
+        }
+        else
+        {
+            <i class="bi bi-arrow-clockwise me-1"></i>
+            <span>Обновить данные</span>
+        }
+    </button>
+</div>
+
+@if (isLoading && !progressData.Any() && summary.TotalDays == 0)
+{
+    <div class="card shadow-sm p-5 text-center">
+        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+        <div class="mt-3 text-muted fw-semibold">Загрузка данных о прогрессе...</div>
+    </div>
+}
+else
+{
+    <!--  БЛОК 1: Сводные карточки + Пульс системы -->
+    <div class="row g-3 mb-4">
+        <div class="col">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body text-center">
+                    <div class="text-muted small text-uppercase fw-bold">Всего дней загружено</div>
+                    <div class="fs-2 fw-bold text-primary mt-2">@summary.TotalDays</div>
+                    <i class="bi bi-calendar-check fs-4 text-primary opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body text-center">
+                    <div class="text-muted small text-uppercase fw-bold">Всего записей</div>
+                    <div class="fs-2 fw-bold text-success mt-2">@summary.TotalRecords.ToString("N0")</div>
+                    <i class="bi bi-database fs-4 text-success opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body text-center">
+                    <div class="text-muted small text-uppercase fw-bold">Самая новая дата</div>
+                    <div class="fs-5 fw-bold text-info mt-3">
+                        @(summary.NewestDate?.ToString("dd.MM.yyyy") ?? "—")
+                    </div>
+                    <i class="bi bi-arrow-up-circle fs-4 text-info opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body text-center">
+                    <div class="text-muted small text-uppercase fw-bold">Глубина архива</div>
+                    <div class="fs-5 fw-bold text-warning mt-3">
+                        @(summary.OldestDate?.ToString("dd.MM.yyyy") ?? "—")
+                    </div>
+                    <i class="bi bi-arrow-down-circle fs-4 text-warning opacity-50"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Пульс системы -->
+        <div class="col">
+            <div class="card shadow-sm border-0 h-100" style="background-color: @pulseCardColor;">
+                <div class="card-body text-center">
+                    <div class="text-uppercase fw-bold mt-1" style="color: @pulseTextColor;">
+                        @pulseTitle
+                    </div>
+                    <div class="fs-6 fw-bold mt-2" style="color: @pulseTextColor;">
+                        @pulseMessage
+                    </div>
+                    <i class="bi bi-heart-pulse-fill fs-3 mt-2" style="color: @pulseTextColor;"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🟡 БЛОК 2: Проблемные дни (Аномалии) -->
+    @if (anomalyDays.Any())
+    {
+        <div class="card shadow-sm border-warning mb-4">
+            <div class="card-header bg-warning bg-opacity-25 text-warning-emphasis fw-bold">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i> Обнаружены аномалии (дней с малым кол-вом записей: @anomalyDays.Count)
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0 compact-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 50%;">📅 Дата показания</th>
+                            <th style="width: 50%;">📊 Кол-во записей (норма ~1000)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var day in anomalyDays)
+                        {
+                            <tr>
+                                <td class="fw-semibold">@day.MeasureDate.ToString("dd.MM.yyyy")</td>
+                                <td class="text-danger fw-bold">@day.RecordCount</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <!-- 🟣 БЛОК 3: Хвост загрузки (Самые старые даты) -->
+    <div class="card shadow-sm border-secondary mb-4">
+        <div class="card-header bg-secondary bg-opacity-10 text-secondary-emphasis fw-bold">
+            <i class="bi bi-clock-history me-2"></i> Хвост загрузки (10 самых старых дат)
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0 compact-table">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 33%;">📅 Дата показания</th>
+                        <th style="width: 33%;">📊 Кол-во записей</th>
+                        <th style="width: 34%;">🕒 Последнее обновление</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var day in historyTail)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@day.MeasureDate.ToString("dd.MM.yyyy")</td>
+                            <td>@day.RecordCount.ToString("N0")</td>
+                            <td>@(day.LastUpdate?.ToString("dd.MM.yyyy HH:mm:ss") ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 🔵 БЛОК 4: Таблица с деталями -->
+    <div class="card shadow-sm">
+        <div class="card-header bg-light fw-bold">
+            <i class="bi bi-list-ul me-2"></i> Детализация по последним дням
+        </div>
+        <div class="card-body p-0">
+            @if (!progressData.Any())
+            {
+                <div class="p-4 text-center text-muted">
+                    <i class="bi bi-emoji-frown fs-1"></i>
+                    <p class="mt-2 mb-0">Нет данных о загрузке истории</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive table-scroll-container">
+                    <table class="table compact-table mb-0">
+                        <thead class="table-dark sticky-thead">
+                            <tr>
+                                <th style="text-align: center; width: 150px;">📅 Дата показания</th>
+                                <th style="text-align: center; width: 150px;">📊 Кол-во записей</th>
+                                <th style="text-align: center;">🕒 Последнее обновление</th>
+                                <th style="text-align: center; width: 150px;">✅ Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in progressData)
+                            {
+                                <tr>
+                                    <td class="text-center fw-semibold">@item.MeasureDate.ToString("dd.MM.yyyy")</td>
+                                    <td class="text-center">@item.RecordCount.ToString("N0")</td>
+                                    <td class="text-center">
+                                        @if (item.LastUpdate.HasValue)
+                                        {
+                                            @item.LastUpdate.Value.ToString("dd.MM.yyyy HH:mm:ss")
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">—</span>
+                                        }
+                                    </td>
+                                    <td class="text-center">
+                                        @if (item.LastUpdate.HasValue && item.LastUpdate.Value.Date == DateTime.Today)
+                                        {
+                                            <span class="badge bg-success"><i class="bi bi-check-circle-fill"></i> Активно</span>
+                                        }
+                                        else if (item.LastUpdate.HasValue)
+                                        {
+                                            <span class="badge bg-info text-dark"><i class="bi bi-clock-history"></i> Загружено</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary"><i class="bi bi-dash-circle"></i> Ожидание</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="mt-3 alert alert-info py-2 small">
+        <i class="bi bi-info-circle-fill"></i>
+        <strong>Как это работает:</strong> Сервис методично закрывает «хвосты» день за днем, двигаясь в прошлое.
+        Дата с пометкой «Активно» означает, что сервис прямо сейчас обрабатывает или только что обработал этот день.
+    </div>
+}
+
+@code {
+    private List<HistoryProgressDto> progressData = new();
+    private HistorySummaryDto summary = new();
+    private List<AnomalyDayDto> anomalyDays = new();
+    private List<HistoryProgressDto> historyTail = new();
+    private DateTime? lastImportTime;
+    private bool isLoading = false;
+
+    // Логика "Пульса системы"
+    private string pulseTitle => lastImportTime == null ? "Нет данных" : "Пульс системы";
+    private string pulseMessage => lastImportTime == null
+        ? "База пуста"
+        : $"Последняя запись: {lastImportTime.Value:dd.MM.yyyy HH:mm:ss}";
+
+    private string pulseCardColor => GetPulseColor();
+    private string pulseTextColor => GetPulseTextColor();
+
+    private string GetPulseColor()
+    {
+        if (lastImportTime == null) return "#f8f9fa";
+        var diff = DateTime.Now - lastImportTime.Value;
+        return diff.TotalHours < 1 ? "#d1e7dd" : "#fff3cd";
+    }
+
+    private string GetPulseTextColor()
+    {
+        if (lastImportTime == null) return "#6c757d";
+        var diff = DateTime.Now - lastImportTime.Value;
+        return diff.TotalHours < 1 ? "#0f5132" : "#664d03";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            //  Загружаем все данные параллельно для максимальной скорости
+            var summaryTask = RawDataService.GetHistorySummaryAsync();
+            var progressTask = RawDataService.GetHistoryProgressAsync();
+            var pulseTask = RawDataService.GetLastImportTimeAsync();
+            var anomalyTask = RawDataService.GetAnomalyDaysAsync();
+            var tailTask = RawDataService.GetHistoryTailAsync();
+
+            await Task.WhenAll(summaryTask, progressTask, pulseTask, anomalyTask, tailTask);
+
+            summary = summaryTask.Result;
+            progressData = progressTask.Result;
+            lastImportTime = pulseTask.Result;
+            anomalyDays = anomalyTask.Result;
+            historyTail = tailTask.Result;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading history progress: {ex}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+}

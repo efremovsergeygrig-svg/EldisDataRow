@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="EldisDataLoader.Day1/EldisDataLoader.Day1.csproj" />
+  <Project Path="EldisDataLoader.Web/EldisDataLoader.Web.csproj" Id="2bb74962-0f11-48d4-a119-8f0746629d26" />
+</Solution>
